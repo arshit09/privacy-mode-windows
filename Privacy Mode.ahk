@@ -326,9 +326,8 @@ SetBatchLines, -1
 global g_Overlays       := {}   ; targetHwnd  → overlayHwnd
 global g_OverlayToTarget := {}  ; overlayHwnd → targetHwnd  (reverse map)
 
-; ── Drag support: clicking the overlay drags the target window
+; ── Block all clicks on the overlay
 OnMessage(0x84, "OverlayHitTest")   ; WM_NCHITTEST
-OnMessage(0xA1, "OverlayDragStart") ; WM_NCLBUTTONDOWN
 
 ; ── Hotkey ───────────────────────────────────────────────────
 #+p::
@@ -384,18 +383,10 @@ RemoveOverlay(targetHwnd) {
     WinActivate, ahk_id `%targetHwnd`%
 }
 
-; ── Overlay drag handlers ─────────────────────────────────────
+; ── Block clicks on the overlay so the hidden window can't be interacted with
 OverlayHitTest(wParam, lParam, msg, hwnd) {
     if (g_OverlayToTarget.HasKey(hwnd))
-        return 2  ; HTCAPTION — entire overlay surface acts as title bar
-}
-
-OverlayDragStart(wParam, lParam, msg, hwnd) {
-    if (g_OverlayToTarget.HasKey(hwnd) && wParam = 2) {
-        targetHwnd := g_OverlayToTarget[hwnd]
-        PostMessage, 0xA1, 2, lParam,, ahk_id `%targetHwnd`%
-        return 0
-    }
+        return 1  ; HTCLIENT — absorb all clicks (no drag, no pass-through)
 }
 
 ; ── Sync loop — keeps overlays aligned & handles lifecycle ───
