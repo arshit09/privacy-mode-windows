@@ -9,12 +9,12 @@ SetBatchLines, -1
 ; ============================================================
 
 global SCRIPT_DIR  := A_ScriptDir . "\Privacy Mode"
-global SCRIPT_DEST := A_ScriptDir . "\Privacy Mode\PrivacyOverlay.ahk"
-global AHK_URL     := "https://www.autohotkey.com/download/1.1/AutoHotkey_1.1.37.02_setup.exe"
+global SCRIPT_DEST := A_ScriptDir . "\Privacy Mode\Privacy Mode.ahk"
+global AHK_URL     := "https://www.autohotkey.com/download/ahk-install.exe"
 global AHK_TMP     := A_Temp . "\ahk_setup.exe"
 global AHK_EXE     := ""
 
-; ── PrivacyOverlay.ahk is embedded at compile time via FileInstall ──
+; ── Privacy Mode.ahk is embedded at compile time via FileInstall ──
 
 BuildGUI()
 OnMessage(0x20, "OnSetCursor")  ; WM_SETCURSOR
@@ -104,7 +104,11 @@ BuildGUI() {
     Gui, Main:Add, Text, x0 y558 w520 Center gOpenWebsite +HwndFooterLinkHwnd, Privacy Mode is free and open source | geek-updates.com
     global g_FooterLinkHwnd := FooterLinkHwnd
 
-    Gui, Main:Show, w520 h580, Privacy Mode - Setup
+    Gui, Main:Font, s8 c4A7FC1, Segoe UI
+    Gui, Main:Add, Text, x0 y574 w520 Center gOpenGitHub +HwndGitHubLinkHwnd, Source Code on GitHub
+    global g_GitHubLinkHwnd := GitHubLinkHwnd
+
+    Gui, Main:Show, w520 h596, Privacy Mode - Setup
 }
 
 ; ── Clickable links ───────────────────────────────────────────
@@ -116,10 +120,14 @@ OpenGuide:
     Run, https://www.notion.so/geekupdates/Privacy-Mode-326735bd8a9d80e586d8df16ec99b667
 return
 
+OpenGitHub:
+    Run, https://github.com/arshit09/privacy-mode-windows
+return
+
 ; ── Hand cursor on link hover ─────────────────────────────────
 OnSetCursor(wParam, lParam) {
-    global g_LinkHwnd, g_GuideLinkHwnd, g_FooterLinkHwnd
-    if (wParam = g_LinkHwnd || wParam = g_GuideLinkHwnd || wParam = g_FooterLinkHwnd) {
+    global g_LinkHwnd, g_GuideLinkHwnd, g_FooterLinkHwnd, g_GitHubLinkHwnd
+    if (wParam = g_LinkHwnd || wParam = g_GuideLinkHwnd || wParam = g_FooterLinkHwnd || wParam = g_GitHubLinkHwnd) {
         DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32649, "Ptr"))
         return 1
     }
@@ -160,11 +168,12 @@ RunSetup() {
         ; ── Step 2: Install AutoHotkey ───────────────────
         SetStep(2, "installing...")
         Log("> Downloading AutoHotkey installer...")
-        Loop, 3 {
-            URLDownloadToFile, % AHK_URL, % AHK_TMP
-            if FileExist(AHK_TMP)
-                break
+        psCmd := "powershell.exe -NoProfile -Command ""[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('" . AHK_URL . "', '" . AHK_TMP . "')"""
+        RunWait, % psCmd,, Hide
+        if !FileExist(AHK_TMP) {
+            ; Retry once
             Sleep, 1500
+            RunWait, % psCmd,, Hide
         }
         if !FileExist(AHK_TMP) {
             Log("  [ERROR] Could not download the installer.")
@@ -217,7 +226,7 @@ RunSetup() {
     MsgBox, 36, Privacy Mode - Startup, Add Privacy Mode to Windows startup?`n`nIt will launch automatically every time you log in.
     IfMsgBox, Yes
     {
-        startupScript := A_Startup . "\PrivacyOverlay.ahk"
+        startupScript := A_Startup . "\Privacy Mode.ahk"
         FileCopy, % SCRIPT_DEST, % startupScript, 1
         if (ErrorLevel = 0) {
             Log("  Added: " . startupScript)
@@ -227,7 +236,7 @@ RunSetup() {
             Log("  [ERROR] Could not write to startup folder.")
             Log("  Fallback - add manually:")
             Log("    Win+R  ->  shell:startup")
-            Log("    Paste PrivacyOverlay.ahk there.")
+            Log("    Paste Privacy Mode.ahk there.")
             SetStep(4, "FAILED")
             launchFrom := SCRIPT_DEST
         }
@@ -326,8 +335,9 @@ SetBatchLines, -1
 global g_Overlays       := {}   ; targetHwnd  → overlayHwnd
 global g_OverlayToTarget := {}  ; overlayHwnd → targetHwnd  (reverse map)
 
-; ── Block all clicks on the overlay
+; ── Drag support: clicking the overlay drags the target window
 OnMessage(0x84, "OverlayHitTest")   ; WM_NCHITTEST
+OnMessage(0xA1, "OverlayDragStart") ; WM_NCLBUTTONDOWN
 
 ; ── Hotkey ───────────────────────────────────────────────────
 #+p::
@@ -383,10 +393,18 @@ RemoveOverlay(targetHwnd) {
     WinActivate, ahk_id `%targetHwnd`%
 }
 
-; ── Block clicks on the overlay so the hidden window can't be interacted with
+; ── Overlay drag handlers ─────────────────────────────────────
 OverlayHitTest(wParam, lParam, msg, hwnd) {
     if (g_OverlayToTarget.HasKey(hwnd))
-        return 1  ; HTCLIENT — absorb all clicks (no drag, no pass-through)
+        return 2  ; HTCAPTION — entire overlay surface acts as title bar
+}
+
+OverlayDragStart(wParam, lParam, msg, hwnd) {
+    if (g_OverlayToTarget.HasKey(hwnd) && wParam = 2) {
+        targetHwnd := g_OverlayToTarget[hwnd]
+        PostMessage, 0xA1, 2, lParam,, ahk_id `%targetHwnd`%
+        return 0
+    }
 }
 
 ; ── Sync loop — keeps overlays aligned & handles lifecycle ───
