@@ -339,6 +339,13 @@ global g_OverlayToTarget := {}  ; overlayHwnd → targetHwnd  (reverse map)
 OnMessage(0x84, "OverlayHitTest")   ; WM_NCHITTEST
 OnMessage(0xA1, "OverlayDragStart") ; WM_NCLBUTTONDOWN
 
+; ── Instant minimize/restore detection via WinEvent hook ──────
+global g_WinEventProc := RegisterCallback("WinEventCallback")
+global g_WinEventHook := DllCall("SetWinEventHook"
+    , "UInt", 0x0016, "UInt", 0x0017
+    , "Ptr", 0, "Ptr", g_WinEventProc
+    , "UInt", 0, "UInt", 0, "UInt", 0x0002, "Ptr")
+
 ; ── Hotkey ───────────────────────────────────────────────────
 #+p::
     activeHwnd := WinExist("A")
@@ -407,8 +414,28 @@ OverlayDragStart(wParam, lParam, msg, hwnd) {
     }
 }
 
+; ── WinEvent callback — fires instantly on minimize/restore ───
+WinEventCallback(hHook, event, hwnd, idObj, idChild, thread, time) {
+    global g_Overlays
+    if (idObj != 0 || idChild != 0)
+        return
+    targetHwnd := hwnd + 0
+    if (!g_Overlays.HasKey(targetHwnd))
+        return
+    overlayHwnd := g_Overlays[targetHwnd]
+    if (event = 0x0016) {
+        Gui, `%overlayHwnd`%:Hide
+    } else if (event = 0x0017) {
+        WinGetPos, x, y, w, h, ahk_id `%targetHwnd`%
+        if (w != "" && h != "")
+            DllCall("SetWindowPos", "Ptr", overlayHwnd, "Ptr", 0
+                , "Int", x, "Int", y, "Int", w, "Int", h
+                , "UInt", 0x0010 | 0x0040)
+    }
+}
+
 ; ── Sync loop — keeps overlays aligned & handles lifecycle ───
-SetTimer, SyncOverlays, 100
+SetTimer, SyncOverlays, 30
 return
 
 SyncOverlays:
